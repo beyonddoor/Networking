@@ -5,6 +5,9 @@ using System.Text;
 
 namespace SolarGames.Networking
 {
+    /// <summary>
+    /// HttpListener的封装
+    /// </summary>
     public class HttpServer : IDisposable
     {
         public string Prefix { get; set; }
@@ -19,20 +22,18 @@ namespace SolarGames.Networking
         public void Listen()
         {
             listener.Start();
-            listener.BeginGetContext(new AsyncCallback(GetContextCallBack), null);
+            listener.BeginGetContext(GetContextCallBack, null);
         }
-
-
+        
         void GetContextCallBack(IAsyncResult ar)
         {
             if (disposed)
                 return;
 
             HttpListenerContext context = listener.EndGetContext(ar);
-            listener.BeginGetContext(new AsyncCallback(GetContextCallBack), null);
+            listener.BeginGetContext(GetContextCallBack, null);
 
-            if (OnRequest != null)
-                OnRequest(context);
+            OnRequest?.Invoke(context);
         }
 
         public void Dispose()
@@ -55,7 +56,7 @@ namespace SolarGames.Networking
             if (string.IsNullOrEmpty(host))
                 host = "*";
 
-            Prefix = string.Format("http://{0}:{1}/", host, port);
+            Prefix = $"http://{host}:{port}/";
             listener = new HttpListener();
             listener.Prefixes.Add(Prefix);
         }
@@ -63,7 +64,7 @@ namespace SolarGames.Networking
         public HttpServer(int port)
             : this()
         {
-            Prefix = string.Format("http://*:{0}/", port);
+            Prefix = $"http://*:{port}/";
             listener = new HttpListener();
             listener.Prefixes.Add(Prefix);
         }

@@ -8,41 +8,23 @@ namespace SolarGames.Networking
 {
 	public class TcpConnection : IDisposable
 	{
+        ICipher cipher;
+        byte[] recv_buffer;
+        byte[] storage_buffer;
+        TcpServer parent;
+        bool closed;
+        
         public int ConnectionId { get; set; }
 
-        public IConnectedObject ConnectedObject
-        {
-            get
-            {
-                return obj;
-            }
-            set
-            {
-                obj = value;
-            }
-        }
+        public IConnectedObject ConnectedObject { get; set; }
 
-        public Socket Socket
-        {
-            get
-            {
-                return socket;
-            }
-        }
+        public Socket Socket { get; private set; }
 
-        ICipher cipher;
-        Socket socket;
-        byte[] recv_buffer;
-		byte[] storage_buffer;
-		TcpServer parent;
-        IConnectedObject obj;
-        bool closed;
-		
-		public TcpConnection(TcpServer parent, Socket socket, int bufferSize, Type cipherType)
+        public TcpConnection(TcpServer parent, Socket socket, int bufferSize, Type cipherType)
 		{
             if (cipherType != null)
                 cipher = Activator.CreateInstance(cipherType) as ICipher;
-			this.socket = socket;
+			this.Socket = socket;
 			this.recv_buffer = new byte[bufferSize];
 			this.storage_buffer = new byte[0];
 			this.parent = parent;
@@ -50,7 +32,7 @@ namespace SolarGames.Networking
 			
             socket.BeginReceive(recv_buffer, 0,
                     recv_buffer.Length, SocketFlags.None,
-                    new AsyncCallback(ReceiveCallback), null);
+                    ReceiveCallback, null);
 		}
 		
   		public void Close()
@@ -58,22 +40,22 @@ namespace SolarGames.Networking
             if (closed) return;
             closed = true;
 
-            if (obj != null)
-                obj.ConnectionDropped();
+            if (ConnectedObject != null)
+                ConnectedObject.ConnectionDropped();
            
             lock (parent.connections) 
                 parent.connections.Remove(this);
 
             System.Diagnostics.Debug.WriteLine(string.Format("{0} disconnected. Connections left: {1}", 
-                this.obj == null ? "Unknown" : this.obj.ToString(), parent.connections.Count));
+                this.ConnectedObject == null ? "Unknown" : this.ConnectedObject.ToString(), parent.connections.Count));
 
-            if (socket != null)
+            if (Socket != null)
             {
-                socket.Close();
-                socket = null;
+                Socket.Close();
+                Socket = null;
             }
             
-            obj = null;
+            ConnectedObject = null;
         }
 
         public void Dispose()
@@ -83,17 +65,17 @@ namespace SolarGames.Networking
 
         public override string ToString()
         {
-            if (socket != null && socket.RemoteEndPoint != null)
-                return string.Format("TcpConnection[address={0}, connected={1}]", socket.RemoteEndPoint.ToString(), socket.Connected.ToString());
-            else
-                return string.Format("TcpConnection[Closed]");
+            if (Socket?.RemoteEndPoint != null)
+                return
+                    $"TcpConnection[address={Socket.RemoteEndPoint}, connected={Socket.Connected.ToString()}]";
+            return "TcpConnection[Closed]";
         }
 
         public bool IsValidUDPSession(UdpSession session)
         {
-            if (session.address.ToString() != ((IPEndPoint)socket.RemoteEndPoint).Address.ToString()) return false;
+            if (session.address.ToString() != ((IPEndPoint)Socket.RemoteEndPoint).Address.ToString()) return false;
             if (session.sessionId != ConnectionId) return false;
-            if (obj == null) return false;
+            if (ConnectedObject == null) return false;
 
             return true;
         }
@@ -104,8 +86,8 @@ namespace SolarGames.Networking
             {
                 int bytesRead = 0;
                 
-                if (socket != null)
-                    bytesRead = socket.EndReceive(result);
+                if (Socket != null)
+                    bytesRead = Socket.EndReceive(result);
 
                 if (bytesRead == 0)
 				{
@@ -126,16 +108,15 @@ namespace SolarGames.Networking
                 while ((packet = TcpPacket.Parse(ref storage_buffer, cipher)) != null)
                 {
 
-                    if (obj == null)
+                    if (ConnectedObject == null)
                         parent.OnNotAuthorizedPacketInternal(this, packet);
                     else
-                        obj.Dispatch(packet);
+                        ConnectedObject.Dispatch(packet);
                 }
 
-                if (socket != null)
-                    socket.BeginReceive(recv_buffer, 0,
-                         recv_buffer.Length, SocketFlags.None,
-                         new AsyncCallback(ReceiveCallback), null);
+                Socket?.BeginReceive(recv_buffer, 0,
+                    recv_buffer.Length, SocketFlags.None,
+                    new AsyncCallback(ReceiveCallback), null);
 
             }
 			catch (ObjectDisposedException) { Close(); }
@@ -145,21 +126,20 @@ namespace SolarGames.Networking
 		
 		public void Send(TcpPacket packet)
 		{
-            if (socket == null) 
+            if (Socket == null) 
                 return;
 
             try
             {
                 byte[] sendBuffer = packet.ToByteArray(cipher);
                 //socket.BeginSend(sendBuffer, 0, sendBuffer.Length, SocketFlags.None, new AsyncCallback(SendCallback), packet);
-                socket.Send(sendBuffer);
+                Socket.Send(sendBuffer);
             }
             catch (ObjectDisposedException)
             { }
             catch (SocketException)
             {
                  Close();
-                 return;
             }
 		}
 
@@ -167,8 +147,8 @@ namespace SolarGames.Networking
         {
             try
             {
-                if (socket == null) return;
-                socket.EndSend(ar);
+                if (Socket == null) return;
+                Socket.EndSend(ar);
             }
             catch (ObjectDisposedException) { }
             catch (SocketException)

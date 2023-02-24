@@ -6,6 +6,9 @@ using SolarGames.Networking.Crypting;
 
 namespace SolarGames.Networking
 {
+    /// <summary>
+    /// packet的抽象，读写基础类型和object
+    /// </summary>
     public interface IPacket
     {
         ushort Type { get; set; }

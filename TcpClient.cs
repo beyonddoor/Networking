@@ -7,21 +7,38 @@ using SolarGames.Networking.Crypting;
 
 namespace SolarGames.Networking
 {
+    /// <summary>
+    /// tcpclient的实现，基于System.Net.Sockets.TcpClient
+    /// 读写、连接都是异步的
+    /// </summary>
     public class TcpClient : IDisposable
     {
-        public delegate void DOnError(TcpClient tcpClient, SocketException ex);
-        public delegate void DOnIncomingPacket(IPacket packet);
-        public delegate void DOnConnect(TcpClient tcpClient);
-        public delegate void DOnDisconnect(TcpClient tcpClient);
-
         public enum TcpClientStatus
         {
             Disconnected,
             Connecting,
             Connected
         }
+        
+        public delegate void DOnError(TcpClient tcpClient, SocketException ex);
+        public delegate void DOnIncomingPacket(IPacket packet);
+        public delegate void DOnConnect(TcpClient tcpClient);
+        public delegate void DOnDisconnect(TcpClient tcpClient);
+        
+        public ICipher Cipher { get; set; }
+        public event DOnError OnError;
+        public event DOnIncomingPacket OnIncomingPacket;
+        public event DOnConnect OnConnect;
+        public event DOnDisconnect OnDisconnect;
 
-        const int defaultBufferSize = ushort.MaxValue * 2;
+        System.Net.Sockets.TcpClient tcpClient;
+        byte[] buffer;
+        byte[] tempBuffer;
+        bool blocking;
+
+        AutoResetEvent connectEvent;
+
+        const int DefaultBufferSize = ushort.MaxValue * 2;
 
         public bool Connected
         {
@@ -29,22 +46,14 @@ namespace SolarGames.Networking
             {
                 lock (tcpClient)
                 {
-                    if (tcpClient == null || tcpClient.Client == null)
-                        return false;
-                    return tcpClient.Connected;
+                    return tcpClient?.Client != null && tcpClient.Connected;
                 }
             }
         }
 
         public TcpClientStatus Status { get; private set; }
 
-        public Socket Socket
-        {
-            get
-            {
-                return tcpClient.Client;
-            }
-        }
+        public Socket Socket => tcpClient.Client;
 
         public int ReceiveBufferSize
         {
@@ -72,26 +81,24 @@ namespace SolarGames.Networking
                     tcpClient.SendBufferSize = value;
             }
         }
-        public ICipher Cipher { get; set; }
-        public event DOnError OnError;
-        public event DOnIncomingPacket OnIncomingPacket;
-        public event DOnConnect OnConnect;
-        public event DOnDisconnect OnDisconnect;
 
-        System.Net.Sockets.TcpClient tcpClient;
-        byte[] buffer;
-        byte[] tempBuffer;
-        bool blocking;
-
-        AutoResetEvent connectEvent;
-
+        /// <summary>
+        /// 异步连接
+        /// </summary>
+        /// <param name="host"></param>
+        /// <param name="port"></param>
         public void ConnectAsync(string host, int port)
         {
             ReInitSocket();
-            tcpClient.BeginConnect(host, port, new AsyncCallback(ConnectCallback), null);
+            tcpClient.BeginConnect(host, port, ConnectCallback, null);
             Status = TcpClientStatus.Connecting;
         }
 
+        /// <summary>
+        /// 同步连接，等待连接事件
+        /// </summary>
+        /// <param name="host"></param>
+        /// <param name="port"></param>
         public void Connect(string host, int port)
         {
             ConnectAsync(host, port);
@@ -103,10 +110,10 @@ namespace SolarGames.Networking
         {
             Status = TcpClientStatus.Disconnected;
 
-            if (tcpClient == null || tcpClient.Client == null || !tcpClient.Connected)
+            if (tcpClient?.Client == null || !tcpClient.Connected)
                 return;
 
-            OnDiconnectInternal();
+            OnDisconnectInternal();
         }
 
         void OnErrorInternal(SocketException ex)
@@ -119,21 +126,19 @@ namespace SolarGames.Networking
             }
 
             if (ex.ErrorCode == 10054)
-                OnDiconnectInternal();
+                OnDisconnectInternal();
 
-            if (OnError != null)
-                OnError(this, ex);
+            OnError?.Invoke(this, ex);
         }
 
-        void OnDiconnectInternal()
+        void OnDisconnectInternal()
         {
             Status = TcpClientStatus.Disconnected;
 
             lock (tcpClient)
             {
                 tcpClient.Close();
-                if (OnDisconnect != null)
-                    OnDisconnect(this);
+                OnDisconnect?.Invoke(this);
             }
         }
 
@@ -149,8 +154,7 @@ namespace SolarGames.Networking
                 Status = TcpClientStatus.Connected;
                 connectEvent.Set();
 
-                if (OnConnect != null)
-                    OnConnect(this);
+                OnConnect?.Invoke(this);
             }
             catch (SocketException ex)
             {
@@ -164,10 +168,15 @@ namespace SolarGames.Networking
             {
                 if (tcpClient.Client == null)
                     return;
+                
                 tcpClient.Client.BeginReceive(tempBuffer, 0, tempBuffer.Length, SocketFlags.None, ReceiveCallback, null);
             }
         }
 
+        /// <summary>
+        /// read循环
+        /// </summary>
+        /// <param name="ar"></param>
         void ReceiveCallback(IAsyncResult ar)
         {
             try
@@ -175,13 +184,13 @@ namespace SolarGames.Networking
                 int bytesRead = 0;
                 lock (tcpClient)
                 {
-                    if (tcpClient == null || tcpClient.Client == null)
+                    if (tcpClient?.Client == null)
                         return;
 
                     bytesRead = tcpClient.Client.EndReceive(ar);
 
                     if (bytesRead == 0)
-                        OnDiconnectInternal();
+                        OnDisconnectInternal();
                 }
 
 
@@ -192,17 +201,14 @@ namespace SolarGames.Networking
                     Array.Copy(tempBuffer, 0, newbuffer, buffer.Length, bytesRead);
                     buffer = newbuffer;
 
-                    TcpPacket packet = null;
+                    TcpPacket packet;
                     while ((packet = TcpPacket.Parse(ref buffer, Cipher)) != null)
                     {
-                        if (OnIncomingPacket != null)
-                            OnIncomingPacket(packet);
+                        OnIncomingPacket?.Invoke(packet);
                     }
                 }
 
                 BeginReceive();
-
-
             }
             catch (SocketException ex)
             {
@@ -218,7 +224,9 @@ namespace SolarGames.Networking
 
                 byte[] sendBuffer = packet.ToByteArray(Cipher);
                 lock (tcpClient)
+                {
                     tcpClient.Client.BeginSend(sendBuffer, 0, sendBuffer.Length, SocketFlags.None, null, null);
+                }
             }
             catch (ObjectDisposedException)
             { }
@@ -230,19 +238,19 @@ namespace SolarGames.Networking
             {
                 lock (tcpClient)
                 {
-
                     tcpClient.Close();
                     tcpClient = null;
                 }
             }
 
-
             if (connectEvent != null)
+            {
                 lock (connectEvent)
                 {
                     connectEvent.Close();
                     connectEvent = null;
                 }
+            }
         }
 
         void ReInitSocket()
@@ -262,8 +270,8 @@ namespace SolarGames.Networking
         {
             this.blocking = blocking;
             this.ReInitSocket();
-            this.ReceiveBufferSize = defaultBufferSize;
-            this.SendBufferSize = defaultBufferSize;
+            this.ReceiveBufferSize = DefaultBufferSize;
+            this.SendBufferSize = DefaultBufferSize;
         }
 
     }

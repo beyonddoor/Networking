@@ -8,12 +8,22 @@ using SolarGames.Networking.Crypting;
 
 namespace SolarGames.Networking
 {
+    /// <summary>
+    /// 维护若干的connection
+    /// </summary>
     public class TcpServer : IDisposable
     {
+        public delegate void DOnNotAuthorizedPacket(TcpServer server, TcpConnection connection, IPacket packet);
+        public event DOnNotAuthorizedPacket OnNotAuthorizedPacket;
+
+        Socket serverSocket;
+        internal List<TcpConnection> connections = new List<TcpConnection>();
+        
         public string Host { get; private set; }
         public int Port { get; private set; }
         public int BufferSize { get; private set; }
         public int AcceptThreads { get; private set; }
+        
         public TcpConnection[] Connections
         {
             get
@@ -24,13 +34,6 @@ namespace SolarGames.Networking
         }
 
         public Type CipherType { get; private set; }
-
-        public delegate void DOnNotAuthorizedPacket(TcpServer server, TcpConnection connection, IPacket packet);
-        public event DOnNotAuthorizedPacket OnNotAuthorizedPacket;
-
-        Socket serverSocket;
-
-        internal List<TcpConnection> connections = new List<TcpConnection>();
 
         public TcpServer(string host, int port, Type cipherType)
             : this(host, port)
@@ -60,8 +63,7 @@ namespace SolarGames.Networking
 
         public void Close()
         {
-            if (serverSocket != null)
-                serverSocket.Close();
+            serverSocket?.Close();
             ClearConnections();
         }
 
@@ -72,18 +74,18 @@ namespace SolarGames.Networking
 
         internal void OnNotAuthorizedPacketInternal(TcpConnection conn, IPacket packet)
         {
-            if (OnNotAuthorizedPacket != null)
-                OnNotAuthorizedPacket(this, conn, packet);
+            OnNotAuthorizedPacket?.Invoke(this, conn, packet);
         }
 
         public void ClearConnections()
         {
             lock (connections)
             {
-                for (int i = 0; i < connections.Count; i++)
+                foreach (var t in connections)
                 {
-                    connections[i].Close();
+                    t.Close();
                 }
+
                 connections.Clear();
             }
         }
@@ -108,13 +110,12 @@ namespace SolarGames.Networking
 
         void AcceptCallback(IAsyncResult result)
         {
-            TcpConnection connection;
             try
             {
                 // Finish Accept
-                Socket conn_socket = serverSocket.EndAccept(result);
-                conn_socket.Blocking = false;
-                connection = new TcpConnection(this, conn_socket, BufferSize, CipherType);
+                Socket connSocket = serverSocket.EndAccept(result);
+                connSocket.Blocking = false;
+                var connection = new TcpConnection(this, connSocket, BufferSize, CipherType);
                 lock (connections) 
                     connections.Add(connection);
 

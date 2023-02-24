@@ -8,7 +8,9 @@ using System.Runtime.Serialization.Formatters.Binary;
 
 namespace SolarGames.Networking
 {
-
+    /// <summary>
+    /// packet的tcp实现，支持加密
+    /// </summary>
     public class TcpPacket : BasePacket, IPacket, IDisposable
 	{
 	
@@ -121,21 +123,19 @@ namespace SolarGames.Networking
         {
             using (MemoryStream data = new MemoryStream())
             {
-                using (BinaryWriter data_writer = new BinaryWriter(data))
+                using (BinaryWriter dataWriter = new BinaryWriter(data))
                 {
                     byte[] body = stream.ToArray();
-                    if (cipher != null)
-                        cipher.Encrypt(ref body, body.Length);
+                    cipher?.Encrypt(ref body, body.Length);
 
-                    data_writer.Write(CodePacketType(type, body.Length));
-                    data_writer.Write((int)body.Length);
-                    data_writer.Write(body, 0, (int)body.Length);
+                    dataWriter.Write(CodePacketType(type, body.Length));
+                    dataWriter.Write((int)body.Length);
+                    dataWriter.Write(body, 0, (int)body.Length);
 
                     return data.ToArray();
                 }
             }
         }
-
 
         public byte[] ToByteArray()
         {
@@ -147,6 +147,12 @@ namespace SolarGames.Networking
             return Parse(ref buffer, null);
         }
 
+        /// <summary>
+        /// 从buff创建packet
+        /// </summary>
+        /// <param name="buffer"></param>
+        /// <param name="cipher"></param>
+        /// <returns></returns>
         public static TcpPacket Parse(ref byte[] buffer, ICipher cipher)
 	    {
 	        if (buffer.Length < 6) return null;
@@ -163,8 +169,7 @@ namespace SolarGames.Networking
 
                 byte[] body = reader.ReadBytes((int)len);
 
-                if (cipher != null)
-                    cipher.Decrypt(ref body, body.Length);
+                cipher?.Decrypt(ref body, body.Length);
 
                 resultPacket = new TcpPacket(body, type);
 
@@ -174,10 +179,6 @@ namespace SolarGames.Networking
                 else
                     buffer = reader.ReadBytes(tailsize);
 
-            }
-            catch
-            {
-                throw;
             }
             finally
             {
@@ -211,7 +212,6 @@ namespace SolarGames.Networking
 	    {
 	        return string.Format("TcpPacket[Type={0},Size={1}]", type, stream.Length);
 	    }
-	
-	}
+    }
 	
 }

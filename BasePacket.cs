@@ -8,21 +8,27 @@ using System.Text;
 
 namespace SolarGames.Networking
 {
+    /// <summary>
+    /// 基础类型和object类型的读写，写入memory stream
+    /// BinaryFormatter 进行obj的序列化
+    /// </summary>
     public class BasePacket
     {
+        protected ushort type;
+
+        /// <summary>
+        /// 数据写入的stream
+        /// </summary>
+        protected MemoryStream stream;
+        protected BinaryWriter writer;
+        protected BinaryReader reader;
+        
         public ushort Type
         {
             get { return type; }
             set { type = value; }
         }
-
-        protected ushort type;
-
-        protected MemoryStream stream;
-        protected BinaryWriter writer;
-        protected BinaryReader reader;
-
-
+        
         public virtual byte[] GetBody()
         {
             return stream.ToArray();
@@ -34,8 +40,11 @@ namespace SolarGames.Networking
             int a2 = ((ushort)len) ^ 0xAAAA;
             return (ushort)(type ^ a1 ^ a2);
         }
-
-
+        
+        /// <summary>
+        /// 将object序列化为byte[]，然后写入writer
+        /// </summary>
+        /// <param name="obj"></param>
         public void WriteSerialize(object obj)
         {
             using (MemoryStream ms = new MemoryStream())
@@ -48,6 +57,10 @@ namespace SolarGames.Networking
             }
         }
 
+        /// <summary>
+        /// 使用  做
+        /// </summary>
+        /// <returns></returns>
         public object ReadSerialized()
         {
             int len = reader.ReadInt32();
